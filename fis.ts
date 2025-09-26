@@ -51,6 +51,9 @@ export class FaultInjectionStack extends cdk.Stack {
           },
         },
       },
+      tags: {
+        Name: 'my-ecs-cpu-stress-exp'
+      }
     });
 
   }
