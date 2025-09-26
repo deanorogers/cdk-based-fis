@@ -126,7 +126,7 @@ export class ECSServiceStack extends cdk.Stack {
     });
 
     // Add tag to the ECS service for FIS targeting
-    cdk.Tags.of(this).add('FIS_ENABLED', 'true');
+   cdk.Tags.of(this).add('FIS_ENABLED', 'true');
 
   }
 }

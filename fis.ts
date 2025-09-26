@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
+import {aws_logs, RemovalPolicy} from 'aws-cdk-lib';
 import {aws_fis as fis} from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as fs from 'fs';
@@ -6,6 +7,10 @@ import * as fs from 'fs';
 export class FaultInjectionStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props: cdk.StackProps) {
     super(scope, id, props);
+
+    const account = cdk.Stack.of(this).account;
+    console.log("Account: ", account);
+    const region = cdk.Stack.of(this).region;
 
     // Read trust policy from file
     const trustPolicy = JSON.parse(
@@ -17,8 +22,16 @@ export class FaultInjectionStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('fis.amazonaws.com'),
     });
 
+
     // Override the assumeRolePolicy with the custom trust policy
     (fisRole.node.defaultChild as iam.CfnRole).assumeRolePolicyDocument = trustPolicy;
+
+    // create a Cloudwatch log group for FIS experiment
+    const fisLogGroup = new aws_logs.LogGroup(this, 'FISLogGroup', {
+      logGroupName: `/aws/fis/ecs-cpu-stress-exp`,
+      retention: aws_logs.RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
 
     // define cfnExperimentTemplate for ECS CPU Stress test
     const experimentTemplate = new fis.CfnExperimentTemplate(this, 'ECSCPUStressTest', {
@@ -53,8 +66,55 @@ export class FaultInjectionStack extends cdk.Stack {
       },
       tags: {
         Name: 'my-ecs-cpu-stress-exp'
+      },
+      logConfiguration: {
+        logSchemaVersion: 1,
+        cloudWatchLogsConfiguration: {
+          LogGroupArn: fisLogGroup.logGroupArn
+        }
       }
     });
+
+    // Attach AWSFaultInjectionSimulatorECSAccess managed policy to FIS role
+    fisRole.addManagedPolicy(
+      iam.ManagedPolicy.fromManagedPolicyArn(
+        this,
+        'FISECSAccessPolicy',
+        'arn:aws:iam::aws:policy/service-role/AWSFaultInjectionSimulatorECSAccess'
+      )
+    );
+
+    // Add inline policy for CloudWatch Logs actions
+    fisRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        "logs:CreateLogDelivery",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:CreateLogGroup",
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams"
+      ],
+      resources: ["*"]
+    }));
+
+    fisRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        "logs:PutResourcePolicy",
+        "logs:DescribeResourcePolicies"
+      ],
+      resources: ["*"]
+    }));
+
+    // Add ECS and SSM permissions
+    fisRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        "ecs:DescribeTasks",
+        "ssm:SendCommand",
+        "ssm:ListCommands",
+        "ssm:CancelCommand"
+      ],
+      resources: ["*"]
+    }));
 
   }
 }
