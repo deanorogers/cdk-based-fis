@@ -5,6 +5,13 @@ import * as ecspatterns from 'aws-cdk-lib/aws-ecs-patterns';
 import { Construct } from 'constructs';
 import { ApplicationLoadBalancedFargateServiceProps } from 'aws-cdk-lib/aws-ecs-patterns';
 
+/*
+* Custom ECS Fargate Service with SSM Agent Sidecar
+* This class extends the ApplicationLoadBalancedFargateService from aws-ecs-patterns
+* and adds a sidecar container running the AWS Systems Manager (SSM) Agent.
+* The SSM Agent allows you to manage and interact with your ECS tasks using
+* AWS Systems Manager capabilities such as the AWS Fault Injection Service.
+*/
 export class CustomApplicationLoadBalancedFargateService extends ecspatterns.ApplicationLoadBalancedFargateService {
       constructor(scope: Construct, id: string, props: ApplicationLoadBalancedFargateServiceProps) {
         super(scope, id, props);
