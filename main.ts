@@ -7,6 +7,8 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as fis from './fis';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { CustomS3Bucket } from './custom-s3-bucket';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as appscaling from 'aws-cdk-lib/aws-applicationautoscaling';
 
 export class ECSServiceStack extends cdk.Stack {
   public readonly cluster: ecs.Cluster;
@@ -74,8 +76,12 @@ export class ECSServiceStack extends cdk.Stack {
       portMappings: [{ containerPort: 80 }],
     });
 
-    // Create the Fargate service with an Application Load Balancer
-    new CustomApplicationLoadBalancedFargateService(this, 'amazon-ecs-sample', {
+    /*************************************************************
+    ** Create the Fargate service with an Application Load Balancer
+    ** Use a custom (extended) construct that provisions a sidecar having SSM Agent
+    ** this is required for FIS to be able to connect to the ECS tasks and, for example, spin the container's CPU
+    *************************************************************/
+    const loadBalancedFargateService = new CustomApplicationLoadBalancedFargateService(this, 'amazon-ecs-sample', {
       cluster: this.cluster,
       circuitBreaker: {
         rollback: true,
@@ -92,6 +98,31 @@ export class ECSServiceStack extends cdk.Stack {
    this.bucket = new CustomS3Bucket(this, 'SimpleBucket', {
      versioned: false
    });
+
+   // allow to scale for FIS experiments
+    const scalableTarget = loadBalancedFargateService.service.autoScaleTaskCount({
+        minCapacity: 1,
+        maxCapacity: 3,
+    });
+
+    // Scale out when CPU > 80% sustained for a 30s period.
+    // Use a 30s-period metric and a step-scaling policy that increments/decrements the desired count.
+    const cpuMetric30s = loadBalancedFargateService.service.metricCpuUtilization({
+      period: cdk.Duration.seconds(30),
+    });
+
+    scalableTarget.scaleOnMetric('CpuStepScaling', {
+      metric: cpuMetric30s,
+      scalingSteps: [
+        // scale in when CPU is low (<= 50%)
+        { upper: 50, change: -1 },
+        // scale out when CPU >= 80%
+        { lower: 80, change: +1 },
+      ],
+      adjustmentType: appscaling.AdjustmentType.CHANGE_IN_CAPACITY,
+      // cooldown to avoid rapid fluctuations
+      cooldown: cdk.Duration.seconds(60),
+    });
 
   } // constructor
 } // stack
