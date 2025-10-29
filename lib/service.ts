@@ -3,6 +3,7 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
 import { IVpc } from 'aws-cdk-lib/aws-ec2';
 import { EcsDeploymentGroup, EcsDeploymentConfig } from 'aws-cdk-lib/aws-codedeploy';
 import { ApplicationTargetGroup } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
@@ -44,6 +45,13 @@ export class EcsBlueGreenStack extends cdk.Stack {
       executionRole: iam.Role.fromRoleName(this, 'ImportedExecutionRole', props.taskExecRoleName),
       taskRole: iam.Role.fromRoleName(this, 'ImportedTaskRole', props.taskRoleName),
       enableFaultInjection: true
+    });
+
+   // create ecr repo
+   const registry = new ecr.Repository(this, 'EcrRepo', {
+      repositoryName: `${props.name}-repository`,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteImages: true,
     });
 
     // Main application container
