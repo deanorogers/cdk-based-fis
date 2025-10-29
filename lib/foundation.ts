@@ -1,4 +1,3 @@
-
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
@@ -32,6 +31,22 @@ export class EcsFoundationStack extends cdk.Stack {
         assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
         description: 'IAM Role for ECS Task Execution'
     });
+
+    // Add ECR permissions to task execution role
+    taskExecRole.addManagedPolicy(
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy')
+    );
+
+    taskExecRole.addToPolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+            'ecr:GetAuthorizationToken',
+            'ecr:BatchCheckLayerAvailability',
+            'ecr:GetDownloadUrlForLayer',
+            'ecr:BatchGetImage'
+        ],
+        resources: ['*']
+    }));
 
     const serviceRole = new iam.Role(this, `${props.name}-ecs-service-role`, {
         roleName: `${props.name}-ecs-service-role`,

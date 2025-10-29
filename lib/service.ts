@@ -56,7 +56,7 @@ export class EcsBlueGreenStack extends cdk.Stack {
 
     // Main application container
     const appContainer = taskDef.addContainer('AppContainer', {
-      image: ecs.ContainerImage.fromRegistry('amazon/amazon-ecs-sample'),
+      image: ecs.ContainerImage.fromRegistry('107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:v1.1'),
       containerName: 'customer-portal',
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: id,
