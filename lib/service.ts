@@ -3,10 +3,13 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as ecr from 'aws-cdk-lib/aws-ecr';
 import { IVpc } from 'aws-cdk-lib/aws-ec2';
 import { EcsDeploymentGroup, EcsDeploymentConfig } from 'aws-cdk-lib/aws-codedeploy';
 import { ApplicationTargetGroup } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { EcsApplication } from 'aws-cdk-lib/aws-codedeploy';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 
 export interface EcsBlueGreenStackProps extends cdk.StackProps {
 
@@ -18,12 +21,19 @@ export interface EcsBlueGreenStackProps extends cdk.StackProps {
     name: string;
     serviceName: string;
     vpc: IVpc;
+    ecrRepository: ecr.IRepository;
+    imageTag: string; // the tag of the image to be deployed, if run as part of GitLab CI/CD this would be the commit SHA or branch name
+    bucket: cdk.aws_s3.IBucket;
 }
 
 export class EcsBlueGreenStack extends cdk.Stack {
 
   public albSecurityGroup: ec2.ISecurityGroup;
-  public taskDefinition: ecs.TaskDefinition
+  public taskDefinition: ecs.TaskDefinition;
+  public deploymentGroup: EcsDeploymentGroup;
+  public cluster: ecs.Cluster;
+  public service: ecs.FargateService;
+  public applicationName: string;
 
   constructor(scope: cdk.App, id: string, props: EcsBlueGreenStackProps) {
     super(scope, id, props);
@@ -38,49 +48,6 @@ export class EcsBlueGreenStack extends cdk.Stack {
        vpc: vpc,
      });
 
-    // Create a Fargate Task Definition
-    const taskDef = new ecs.FargateTaskDefinition(this, 'TaskDef', {
-      memoryLimitMiB: 512,
-      cpu: 256,
-      executionRole: iam.Role.fromRoleName(this, 'ImportedExecutionRole', props.taskExecRoleName),
-      taskRole: iam.Role.fromRoleName(this, 'ImportedTaskRole', props.taskRoleName),
-      enableFaultInjection: true
-    });
-
-   // create ecr repo
-   const registry = new ecr.Repository(this, 'EcrRepo', {
-      repositoryName: `${props.name}-repository`,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      autoDeleteImages: true,
-    });
-
-    // Main application container
-    const appContainer = taskDef.addContainer('AppContainer', {
-      image: ecs.ContainerImage.fromRegistry('107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:v1.1'),
-      containerName: 'customer-portal',
-      logging: ecs.LogDrivers.awsLogs({
-        streamPrefix: id,
-        logRetention: 1,
-      }),
-      // map 8080 to 80
-      portMappings: [{ containerPort: 80, hostPort: 80 }],
-    });
-
-    // create a Fargate ECS service and place into the defined VPC and subnets
-    const service = new ecs.FargateService(this, 'FargateService', {
-      cluster: cluster,
-      taskDefinition: taskDef,
-      desiredCount: 2,
-      assignPublicIp: false,
-      serviceName: props.serviceName,
-      vpcSubnets: {
-            subnetType: ec2.SubnetType.PRIVATE_WITH_NAT,
-      },
-      deploymentController: {
-        type: ecs.DeploymentControllerType.CODE_DEPLOY
-      }
-    });
-
     // define ALB and place into routable subnets
     const alb = new elbv2.ApplicationLoadBalancer(this, 'ALB', {
       vpc: vpc,
@@ -91,8 +58,6 @@ export class EcsBlueGreenStack extends cdk.Stack {
       loadBalancerName: `${props.name}-alb`
     });
 
-    // allow traffic from ALB to ECS
-    service.connections.allowFrom(alb, ec2.Port.tcp(props.portRange), 'Allow traffic from ALB to ECS Service');
 
     const tg = {
         vpc: vpc,
@@ -127,8 +92,105 @@ export class EcsBlueGreenStack extends cdk.Stack {
       defaultTargetGroups: [greenTargetGroup]
     });
 
-    service.attachToApplicationTargetGroup(blueTargetGroup as ApplicationTargetGroup);
-    new EcsDeploymentGroup(this, 'BlueGreenDG', {
+    // create explicitly (rather than as part of deploymentGroup)
+    // then export for reference in the code pipeline stack
+    const application = new EcsApplication(this, 'CodeDeployApp', {
+        applicationName: `${props.serviceName}-app`
+    });
+    this.applicationName = application.applicationName;
+
+
+
+    /***************************
+     ** now create the code deploy assets and store in S3
+    ****************************/
+
+    // Create AppSpec content inline
+    const appSpecContent = {
+      version: '0.0',
+      Resources: [
+        {
+          TargetService: {
+            Type: 'AWS::ECS::Service',
+            Properties: {
+              TaskDefinition: '<TASK_DEFINITION>',
+              LoadBalancerInfo: {
+                ContainerName: 'customer-portal',
+                ContainerPort: 80,
+              },
+              PlatformVersion: 'LATEST',
+            },
+          },
+        },
+      ],
+    };
+
+    // Define imageDetail.json
+    const imageDetailContent = {
+      ImageURI: `${props.ecrRepository.repositoryUri}:${props.imageTag}`
+    };
+
+    // Create a Fargate Task Definition
+    const taskDef = new ecs.FargateTaskDefinition(this, 'TaskDef', {
+      executionRole: iam.Role.fromRoleName(this, 'ImportedExecutionRole', props.taskExecRoleName),
+      taskRole: iam.Role.fromRoleName(this, 'ImportedTaskRole', props.taskRoleName),
+      enableFaultInjection: false
+    });
+
+    // this is needed to allow CodeDeploy to thereafter update the task definition
+    const appContainer = taskDef.addContainer('AppContainer', {
+      image: ecs.ContainerImage.fromRegistry(
+        `${props.ecrRepository.repositoryUri}:${props.imageTag}`
+      ),
+      containerName: 'customer-portal',
+      portMappings: [{ containerPort: 80, hostPort: 80 }]
+    });
+
+    // Create task definition JSON (with roles added dynamically)
+    const taskDefContent = {
+      family: taskDef.family,
+      executionRoleArn: taskDef.executionRole?.roleArn,
+      taskRoleArn: taskDef.taskRole?.roleArn,
+      networkMode: 'awsvpc',
+      requiresCompatibilities: ['FARGATE'],
+      cpu: 256,
+      memory: 512,
+      containerDefinitions: [
+        {
+          name: 'customer-portal',
+          image: '<IMAGE1_NAME>',
+          essential: true,
+          portMappings: [
+            {
+              containerPort: 80,
+              protocol: 'tcp'
+            }
+          ]
+        }
+      ]
+    };
+
+    // create a Fargate ECS service and place into the defined VPC and subnets
+    const service = new ecs.FargateService(this, 'FargateService', {
+      cluster: cluster,
+      taskDefinition: taskDef,
+      desiredCount: 2,
+      assignPublicIp: false,
+      serviceName: props.serviceName,
+      vpcSubnets: {
+            subnetType: ec2.SubnetType.PRIVATE_WITH_NAT,
+      },
+      deploymentController: {
+        type: ecs.DeploymentControllerType.CODE_DEPLOY
+      }
+    });
+
+    // allow traffic from ALB to ECS
+    service.connections.allowFrom(alb, ec2.Port.tcp(props.portRange), 'Allow traffic from ALB to ECS Service');
+
+   service.attachToApplicationTargetGroup(blueTargetGroup as ApplicationTargetGroup);
+    const deploymentGroup = new EcsDeploymentGroup(this, 'BlueGreenDG', {
+        application: application,
         service,
         blueGreenDeploymentConfig: {
             blueTargetGroup: blueTargetGroup,
@@ -139,51 +201,37 @@ export class EcsBlueGreenStack extends cdk.Stack {
         deploymentConfig: EcsDeploymentConfig.ALL_AT_ONCE,
     });
 
-
-//     const prodRule = new elbv2.ApplicationListenerRule(this, id + 'ProdRule', {
-//         listener: listener,
-//         priority: 1,
-//         conditions: [
-//             elbv2.ListenerCondition.pathPatterns(['/*'])
-//         ],
-//         action: elbv2.ListenerAction.weightedForward([
-//             {
-//                 targetGroup: blueTargetGroup, // use the target group object, not a string
-//                 weight: 100
-//             }
-//         ])
-//     });
-
-//     const testRule = new elbv2.ApplicationListenerRule(this, id + 'TestRule', {
-//         listener: testListener,
-//         priority: 1,
-//         conditions: [
-//             elbv2.ListenerCondition.pathPatterns(['/*'])
-//         ],
-//         action: elbv2.ListenerAction.weightedForward([
-//             {
-//                 targetGroup: greenTargetGroup, // use the target group object, not a string
-//                 weight: 100
-//             }
-//         ])
-//     });
-
+    this.deploymentGroup = deploymentGroup;
 
     const cfnService = service.node.defaultChild as ecs.CfnService;
 
-//     cfnService.loadBalancers = [{
-//         containerName: appContainer.containerName,
-//         containerPort: 80,  // Use the actual container port, not the ALB port
-//         targetGroupArn: blueTargetGroup.targetGroupArn
-//     }];
-//
-//     // For CODE_DEPLOY, we need to set the deployment configuration properly
-//     cfnService.deploymentConfiguration = {
-//         deploymentCircuitBreaker: {
-//             enable: true,
-//             rollback: true
-//         }
-//     };
+
+    // Upload appspec.yaml directly to S3
+    new s3deploy.BucketDeployment(this, 'DeployAppSpec', {
+      sources: [
+        s3deploy.Source.data('appspec.yaml', JSON.stringify(appSpecContent, null, 2))
+      ],
+      destinationBucket: props.bucket,
+      destinationKeyPrefix: `${props.serviceName}/`,
+    });
+
+    // Upload imagedetail.json directly to S3
+    new s3deploy.BucketDeployment(this, 'DeployImageDetail', {
+      sources: [
+        s3deploy.Source.data('imagedetail.json', JSON.stringify(imageDetailContent, null, 2))
+      ],
+      destinationBucket: props.bucket,
+      destinationKeyPrefix: `${props.serviceName}/`,
+    });
+
+    // Upload taskdef.json directly to S3
+    new s3deploy.BucketDeployment(this, 'DeployTaskDef', {
+      sources: [
+        s3deploy.Source.data('taskdef.json', JSON.stringify(taskDefContent, null, 2))
+      ],
+      destinationBucket: props.bucket,
+      destinationKeyPrefix: `${props.serviceName}/`,
+    });
 
     // Output the values needed for CodeDeploy configuration
     new cdk.CfnOutput(this, 'BlueTargetGroupArn', {
@@ -209,6 +257,21 @@ export class EcsBlueGreenStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'EcsClusterName', {
       value: cluster.clusterName,
       exportName: `${props.serviceName}-cluster`
+    });
+
+    // Store references for pipeline
+    this.cluster = cluster;
+    this.service = service;
+    this.taskDefinition = taskDef;
+
+    new cdk.CfnOutput(this, 'DeploymentGroupName', {
+      value: deploymentGroup.deploymentGroupName,
+      exportName: `${props.serviceName}-dg-name`
+    });
+
+    new cdk.CfnOutput(this, 'TaskDefinitionFamily', {
+      value: taskDef.family,
+      exportName: `${props.serviceName}-taskdef-family`
     });
   }
 }

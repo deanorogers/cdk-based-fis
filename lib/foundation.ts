@@ -3,6 +3,8 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { IVpc } from 'aws-cdk-lib/aws-ec2';
 import { ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 
 export interface EcsFoundationStackProps extends cdk.StackProps {
     portRange: number;
@@ -16,6 +18,8 @@ export class EcsFoundationStack extends cdk.Stack {
   public taskExecRoleName: string;
   public serviceRoleArn: string;
   public vpc: IVpc;
+  public ecrRepository: ecr.IRepository;
+  public artifactBucket: s3.Bucket;
 
   constructor(scope: cdk.App, id: string, props: EcsFoundationStackProps) {
     super(scope, id, props);
@@ -25,6 +29,16 @@ export class EcsFoundationStack extends cdk.Stack {
         assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
         description: 'IAM Role for ECS Task Definition'
     });
+
+
+   // create ecr repo early and push image ready for later stacks to use
+   const registry = new ecr.Repository(this, 'EcrRepo', {
+      repositoryName: `${props.name}-repository`,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteImages: true,
+      imageScanOnPush: true
+    });
+    this.ecrRepository = registry;
 
     const taskExecRole = new iam.Role(this, `${props.name}-ecs-task-exec-role`, {
         roleName: `${props.name}-ecs-task-exec-role`,
@@ -144,5 +158,13 @@ export class EcsFoundationStack extends cdk.Stack {
         }
       ],
     });
+
+    // Create S3 bucket for pipeline artifacts
+    const artifactBucket = new s3.Bucket(this, 'PipelineArtifactBucket', {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+    this.artifactBucket = artifactBucket;
+
   }
 }
