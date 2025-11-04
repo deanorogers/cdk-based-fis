@@ -1,5 +1,7 @@
 {
   "family": "customer-portal-task",
+  "executionRoleArn": "<TASK_EXEC_ROLE_ARN>",
+  "taskRoleArn": "<TASK_ROLE_ARN>",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "256",
@@ -18,3 +20,4 @@
     }
   ]
 }
+

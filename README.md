@@ -7,6 +7,10 @@ This repository demonstrates how to implement Blue/Green deployments for Amazon 
 % docker pull amazon/amazon-ecs-sample:latest
 % docker tag amazon/amazon-ecs-sample:latest 107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:1.0.0
 % docker push 107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:1.0.0
+
+% docker build -t customer-portal-repository:latest .
+% docker tag customer-portal-repository:latest 107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:1.0.1
+% docker push 107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:1.0.1
 ```
 
 ## Resources

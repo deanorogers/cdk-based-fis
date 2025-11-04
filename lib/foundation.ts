@@ -159,10 +159,11 @@ export class EcsFoundationStack extends cdk.Stack {
       ],
     });
 
-    // Create S3 bucket for pipeline artifacts
+    // Create a versioned S3 bucket for pipeline artifacts
     const artifactBucket = new s3.Bucket(this, 'PipelineArtifactBucket', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
+      versioned: true,
     });
     this.artifactBucket = artifactBucket;
 

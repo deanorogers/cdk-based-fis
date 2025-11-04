@@ -17,10 +17,14 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "aws-cdk": "2.1024.0",
-    "typescript": "5"
+    "typescript": "5",
+    "@types/jszip": "3.10.1"
   },
   "dependencies": {
     "aws-cdk-lib": "2.209.0",
-    "constructs": "^10.2.69"
+    "constructs": "^10.2.69",
+    "adm-zip": "0.5.16",
+    "@types/adm-zip": "0.4.34",
+    "jszip": "3.10.1"
   }
 }

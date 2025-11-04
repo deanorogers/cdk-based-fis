@@ -10,6 +10,8 @@ import { EcsApplication } from 'aws-cdk-lib/aws-codedeploy';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
+import * as path from 'path';
+import * as JSZip from 'jszip';
 
 export interface EcsBlueGreenStackProps extends cdk.StackProps {
 
@@ -127,7 +129,8 @@ export class EcsBlueGreenStack extends cdk.Stack {
 
     // Define imageDetail.json
     const imageDetailContent = {
-      ImageURI: `${props.ecrRepository.repositoryUri}:${props.imageTag}`
+      // ImageURI: `${props.ecrRepository.repositoryUri}:${props.imageTag}`
+      ImageURI: '107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:latest'
     };
 
     // Create a Fargate Task Definition
@@ -205,32 +208,29 @@ export class EcsBlueGreenStack extends cdk.Stack {
 
     const cfnService = service.node.defaultChild as ecs.CfnService;
 
+    const configDir = path.join(__dirname, '../cdk.out/config-files');
+    const fs = require('fs');
+
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+
+//     // create the ZIP file
+//     const zip = new JSZip();
+//     zip.file('appspec.yaml', JSON.stringify(appSpecContent, null, 2));
+//     zip.file('imagedetail.json', JSON.stringify(imageDetailContent, null, 2));
+//     zip.file('taskdef.json', JSON.stringify(taskDefContent, null, 2));
+
+    fs.writeFileSync(path.join(configDir, 'appspec.yaml'), JSON.stringify(appSpecContent, null, 2));
+    fs.writeFileSync(path.join(configDir, 'imagedetail.json'), JSON.stringify(imageDetailContent, null, 2));
+    fs.writeFileSync(path.join(configDir, 'taskdef.json'), JSON.stringify(taskDefContent, null, 2));
 
     // Upload appspec.yaml directly to S3
     new s3deploy.BucketDeployment(this, 'DeployAppSpec', {
-      sources: [
-        s3deploy.Source.data('appspec.yaml', JSON.stringify(appSpecContent, null, 2))
-      ],
+      sources: [s3deploy.Source.asset(configDir)],
       destinationBucket: props.bucket,
       destinationKeyPrefix: `${props.serviceName}/`,
-    });
-
-    // Upload imagedetail.json directly to S3
-    new s3deploy.BucketDeployment(this, 'DeployImageDetail', {
-      sources: [
-        s3deploy.Source.data('imagedetail.json', JSON.stringify(imageDetailContent, null, 2))
-      ],
-      destinationBucket: props.bucket,
-      destinationKeyPrefix: `${props.serviceName}/`,
-    });
-
-    // Upload taskdef.json directly to S3
-    new s3deploy.BucketDeployment(this, 'DeployTaskDef', {
-      sources: [
-        s3deploy.Source.data('taskdef.json', JSON.stringify(taskDefContent, null, 2))
-      ],
-      destinationBucket: props.bucket,
-      destinationKeyPrefix: `${props.serviceName}/`,
+      extract: false // do not extract, we want the ZIP as is
     });
 
     // Output the values needed for CodeDeploy configuration

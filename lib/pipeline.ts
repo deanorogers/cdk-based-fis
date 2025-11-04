@@ -36,7 +36,7 @@ export class EcsBlueGreenPipelineStack extends cdk.Stack {
         new codepipeline_actions.S3SourceAction({
           actionName: 'S3_Source',
           bucket: props.artifactBucket,
-          bucketKey: `${props.serviceName}/`,
+          bucketKey: 'api',
           output: s3SourceOutput,
           trigger: codepipeline_actions.S3Trigger.NONE, // Don't trigger on S3 changes
         }),
