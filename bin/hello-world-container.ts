@@ -31,7 +31,7 @@ const ecsServiceStack = new EcsBlueGreenStack(app, 'EcsBlueGreenStack', {
     serviceName: serviceName,
     vpc: ecsFoundationStack.vpc,
     ecrRepository: ecsFoundationStack.ecrRepository,
-    imageTag: app.node.tryGetContext('imageTag') || 'latest',
+    imageTag: app.node.tryGetContext('imageTag') || '1.0.1',
     bucket: ecsFoundationStack.artifactBucket
 });
 
