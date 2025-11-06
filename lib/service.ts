@@ -130,7 +130,7 @@ export class EcsBlueGreenStack extends cdk.Stack {
     // Define imageDetail.json
     const imageDetailContent = {
       // ImageURI: `${props.ecrRepository.repositoryUri}:${props.imageTag}`
-      ImageURI: '107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:latest'
+      ImageURI: '107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:1.0.1'
     };
 
     // Create a Fargate Task Definition
