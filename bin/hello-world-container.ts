@@ -36,7 +36,7 @@ const ecsServiceStack = new EcsBlueGreenStack(app, 'EcsBlueGreenStack', {
 });
 
 // Create the pipeline stack
-// CDK will automatically infer dependencies based on resource references
+// Pass the deployedObjectKey token directly from the ecsServiceStack (avoid import/export cycle)
 const pipelineStack = new EcsBlueGreenPipelineStack(app, 'EcsBlueGreenPipelineStack', {
   ecrRepository: ecsFoundationStack.ecrRepository,
   deploymentGroupName: ecsServiceStack.deploymentGroup.deploymentGroupName,

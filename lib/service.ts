@@ -12,6 +12,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as path from 'path';
 import * as JSZip from 'jszip';
+import * as yaml from 'js-yaml';
 
 export interface EcsBlueGreenStackProps extends cdk.StackProps {
 
@@ -36,6 +37,7 @@ export class EcsBlueGreenStack extends cdk.Stack {
   public cluster: ecs.Cluster;
   public service: ecs.FargateService;
   public applicationName: string;
+  public deployedObjectKey: string; // expose the deployed object key token
 
   constructor(scope: cdk.App, id: string, props: EcsBlueGreenStackProps) {
     super(scope, id, props);
@@ -109,7 +111,6 @@ export class EcsBlueGreenStack extends cdk.Stack {
 
     // Create AppSpec content inline
     const appSpecContent = {
-      version: '0.0',
       Resources: [
         {
           TargetService: {
@@ -120,7 +121,7 @@ export class EcsBlueGreenStack extends cdk.Stack {
                 ContainerName: 'customer-portal',
                 ContainerPort: 80,
               },
-              PlatformVersion: 'LATEST',
+              PlatformVersion: '1.4.0',
             },
           },
         },
@@ -133,10 +134,13 @@ export class EcsBlueGreenStack extends cdk.Stack {
       ImageURI: '107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:1.0.1'
     };
 
+    const executionRole = iam.Role.fromRoleName(this, 'ImportedExecutionRoleForTaskDef', props.taskExecRoleName);
+    const taskRole = iam.Role.fromRoleName(this, 'ImportedTaskRoleForTaskDef', props.taskRoleName);
+
     // Create a Fargate Task Definition
     const taskDef = new ecs.FargateTaskDefinition(this, 'TaskDef', {
-      executionRole: iam.Role.fromRoleName(this, 'ImportedExecutionRole', props.taskExecRoleName),
-      taskRole: iam.Role.fromRoleName(this, 'ImportedTaskRole', props.taskRoleName),
+      executionRole: executionRole,
+      taskRole: taskRole,
       enableFaultInjection: false
     });
 
@@ -152,8 +156,8 @@ export class EcsBlueGreenStack extends cdk.Stack {
     // Create task definition JSON (with roles added dynamically)
     const taskDefContent = {
       family: taskDef.family,
-      executionRoleArn: taskDef.executionRole?.roleArn,
-      taskRoleArn: taskDef.taskRole?.roleArn,
+      executionRoleArn: executionRole.roleArn,
+      taskRoleArn: taskRole.roleArn,
       networkMode: 'awsvpc',
       requiresCompatibilities: ['FARGATE'],
       cpu: 256,
@@ -215,22 +219,39 @@ export class EcsBlueGreenStack extends cdk.Stack {
       fs.mkdirSync(configDir, { recursive: true });
     }
 
-//     // create the ZIP file
-//     const zip = new JSZip();
-//     zip.file('appspec.yaml', JSON.stringify(appSpecContent, null, 2));
-//     zip.file('imagedetail.json', JSON.stringify(imageDetailContent, null, 2));
-//     zip.file('taskdef.json', JSON.stringify(taskDefContent, null, 2));
+    // Build Resources section separately
+    const resourcesYaml = yaml.dump({ Resources: appSpecContent.Resources }, {
+      lineWidth: -1,
+      noCompatMode: true
+    });
 
-    fs.writeFileSync(path.join(configDir, 'appspec.yaml'), JSON.stringify(appSpecContent, null, 2));
-    fs.writeFileSync(path.join(configDir, 'imagedetail.json'), JSON.stringify(imageDetailContent, null, 2));
+    // Manually prepend version to avoid number normalization
+    // ensure version is a STRING in the AppSpec (quote it) to avoid NUMBER -> STRING conversion errors
+    const appSpecYaml = `version: "0.0"\n${resourcesYaml}`;
+
+    fs.writeFileSync(path.join(configDir, 'appspec.yaml'), appSpecYaml);
+
+    // fs.writeFileSync(path.join(configDir, 'appspec.yaml'), yaml.dump(appSpecContent, {lineWidth: -1, noCompatMode: true}));
+    fs.writeFileSync(path.join(configDir, 'imageDetail.json'), JSON.stringify(imageDetailContent, null, 2));
     fs.writeFileSync(path.join(configDir, 'taskdef.json'), JSON.stringify(taskDefContent, null, 2));
 
-    // Upload appspec.yaml directly to S3
-    new s3deploy.BucketDeployment(this, 'DeployAppSpec', {
+    // Upload zip file to S3
+    // the zip file will be named with a generated hash
+    // therefore, need to obtain for use in code pipleine stack
+    // destinationKeyPrefix: `${props.serviceName}/`,
+    const deployment = new s3deploy.BucketDeployment(this, 'DeployAppSpecV2', {
       sources: [s3deploy.Source.asset(configDir)],
       destinationBucket: props.bucket,
-      destinationKeyPrefix: `${props.serviceName}/`,
-      extract: false // do not extract, we want the ZIP as is
+      extract: false, // do not extract, we want the ZIP as is
+      prune: true
+    });
+    const deployedObjectKey = cdk.Fn.select(0, deployment.objectKeys); // to be passed to the pipeline stack
+
+    // output the deployedObjectKey
+    new cdk.CfnOutput(this, 'AppSpecS3Key', {
+      // ensure the CfnOutput.Value is rendered as a string by joining the token
+      value: deployedObjectKey,
+      exportName: `${props.serviceName}-appspec-s3-key`
     });
 
     // Output the values needed for CodeDeploy configuration

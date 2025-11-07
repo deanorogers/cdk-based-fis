@@ -164,6 +164,7 @@ export class EcsFoundationStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       versioned: true,
+      bucketName: `${props.name}-pipeline-artifacts`,
     });
     this.artifactBucket = artifactBucket;
 
