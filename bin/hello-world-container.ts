@@ -41,7 +41,7 @@ const pipelineStack = new EcsBlueGreenPipelineStack(app, 'EcsBlueGreenPipelineSt
   ecrRepository: ecsFoundationStack.ecrRepository,
   deploymentGroupName: ecsServiceStack.deploymentGroup.deploymentGroupName,
   clusterName: ecsServiceStack.cluster.clusterName,
-  serviceName: ecsServiceStack.service.serviceName,
+  serviceName: serviceName, // use plain string to ensure stable export name resolution
   taskDefinitionFamily: ecsServiceStack.taskDefinition.family,
   applicationName: ecsServiceStack.applicationName,
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },

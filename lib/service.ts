@@ -27,6 +27,7 @@ export interface EcsBlueGreenStackProps extends cdk.StackProps {
     ecrRepository: ecr.IRepository;
     imageTag: string; // the tag of the image to be deployed, if run as part of GitLab CI/CD this would be the commit SHA or branch name
     bucket: cdk.aws_s3.IBucket;
+    accountId?: string; // optional explicit account id for building concrete ARNs in artifacts
 }
 
 export class EcsBlueGreenStack extends cdk.Stack {
@@ -109,24 +110,8 @@ export class EcsBlueGreenStack extends cdk.Stack {
      ** now create the code deploy assets and store in S3
     ****************************/
 
-    // Create AppSpec content inline
-    const appSpecContent = {
-      Resources: [
-        {
-          TargetService: {
-            Type: 'AWS::ECS::Service',
-            Properties: {
-              TaskDefinition: '<TASK_DEFINITION>',
-              LoadBalancerInfo: {
-                ContainerName: 'customer-portal',
-                ContainerPort: 80,
-              },
-              PlatformVersion: '1.4.0',
-            },
-          },
-        },
-      ],
-    };
+    // Replace previous json-encoded appSpecContent construction with raw YAML
+    const appSpecYaml = `Resources:\n- TargetService:\n    Type: AWS::ECS::Service\n    Properties:\n      TaskDefinition: <TASK_DEFINITION>\n      LoadBalancerInfo:\n        ContainerName: customer-portal\n        ContainerPort: "80"\n      PlatformVersion: 1.4.0\nversion: 0.0\n`;
 
     // Define imageDetail.json
     const imageDetailContent = {
@@ -134,8 +119,12 @@ export class EcsBlueGreenStack extends cdk.Stack {
       ImageURI: '107404535822.dkr.ecr.us-east-1.amazonaws.com/customer-portal-repository:1.0.1'
     };
 
+
     const executionRole = iam.Role.fromRoleName(this, 'ImportedExecutionRoleForTaskDef', props.taskExecRoleName);
     const taskRole = iam.Role.fromRoleName(this, 'ImportedTaskRoleForTaskDef', props.taskRoleName);
+
+    // Resolve a concrete account ID for artifact files (avoid CDK Tokens inside JSON written to disk)
+    const accountId = props.accountId ?? props.env?.account ?? process.env.CDK_DEFAULT_ACCOUNT ?? '';
 
     // Create a Fargate Task Definition
     const taskDef = new ecs.FargateTaskDefinition(this, 'TaskDef', {
@@ -153,15 +142,19 @@ export class EcsBlueGreenStack extends cdk.Stack {
       portMappings: [{ containerPort: 80, hostPort: 80 }]
     });
 
+    // Build concrete ARNs for roles to embed in the taskdef.json artifact (no CDK tokens)
+    const executionRoleArn = `arn:aws:iam::${accountId}:role/${props.name}-ecs-task-exec-role`;
+    const taskRoleArn = `arn:aws:iam::${accountId}:role/${props.name}-ecs-task-role`;
+
     // Create task definition JSON (with roles added dynamically)
     const taskDefContent = {
       family: taskDef.family,
-      executionRoleArn: executionRole.roleArn,
-      taskRoleArn: taskRole.roleArn,
+      executionRoleArn: executionRoleArn,
+      taskRoleArn: taskRoleArn,
       networkMode: 'awsvpc',
       requiresCompatibilities: ['FARGATE'],
-      cpu: 256,
-      memory: 512,
+      cpu: "256",
+      memory: "512",
       containerDefinitions: [
         {
           name: 'customer-portal',
@@ -219,19 +212,8 @@ export class EcsBlueGreenStack extends cdk.Stack {
       fs.mkdirSync(configDir, { recursive: true });
     }
 
-    // Build Resources section separately
-    const resourcesYaml = yaml.dump({ Resources: appSpecContent.Resources }, {
-      lineWidth: -1,
-      noCompatMode: true
-    });
-
-    // Manually prepend version to avoid number normalization
-    // ensure version is a STRING in the AppSpec (quote it) to avoid NUMBER -> STRING conversion errors
-    const appSpecYaml = `version: "0.0"\n${resourcesYaml}`;
-
+    // Write AppSpec YAML directly
     fs.writeFileSync(path.join(configDir, 'appspec.yaml'), appSpecYaml);
-
-    // fs.writeFileSync(path.join(configDir, 'appspec.yaml'), yaml.dump(appSpecContent, {lineWidth: -1, noCompatMode: true}));
     fs.writeFileSync(path.join(configDir, 'imageDetail.json'), JSON.stringify(imageDetailContent, null, 2));
     fs.writeFileSync(path.join(configDir, 'taskdef.json'), JSON.stringify(taskDefContent, null, 2));
 
@@ -244,13 +226,14 @@ export class EcsBlueGreenStack extends cdk.Stack {
       destinationBucket: props.bucket,
       extract: false, // do not extract, we want the ZIP as is
       prune: true
+      // outputObjectKeys defaults to true; we need it to select the first key
     });
     const deployedObjectKey = cdk.Fn.select(0, deployment.objectKeys); // to be passed to the pipeline stack
+    this.deployedObjectKey = deployedObjectKey; // expose the deployedObjectKey token
 
-    // output the deployedObjectKey
+    // output a single string (the first object key) to allow clean cross-stack import
     new cdk.CfnOutput(this, 'AppSpecS3Key', {
-      // ensure the CfnOutput.Value is rendered as a string by joining the token
-      value: deployedObjectKey,
+      value: cdk.Token.asString(deployedObjectKey),
       exportName: `${props.serviceName}-appspec-s3-key`
     });
 
