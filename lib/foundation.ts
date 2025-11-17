@@ -168,5 +168,19 @@ export class EcsFoundationStack extends cdk.Stack {
     });
     this.artifactBucket = artifactBucket;
 
+    // Object-level permissions
+    artifactBucket.addToResourcePolicy(new iam.PolicyStatement({
+      principals: [new iam.AccountRootPrincipal()],
+      actions: ['s3:GetObject', 's3:GetObjectVersion', 's3:PutObject'],
+      resources: [artifactBucket.arnForObjects('*')],
+    }));
+
+    // Bucket-level permissions
+    artifactBucket.addToResourcePolicy(new iam.PolicyStatement({
+      principals: [new iam.AccountRootPrincipal()],
+      actions: ['s3:GetBucketVersioning'],
+      resources: [artifactBucket.bucketArn],
+    }));
+
   }
 }

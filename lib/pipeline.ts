@@ -29,12 +29,12 @@ export class EcsBlueGreenPipelineStack extends cdk.Stack {
     });
 
     // Import the single object key exported by the service stack
-    const appSpecObjectKey = cdk.Fn.importValue(`${props.serviceName}-appspec-s3-key`);
+    // const appSpecObjectKey = cdk.Fn.importValue(`${props.serviceName}-appspec-s3-key`);
 
     // IAM: allow read of the specific object key and listing the bucket
     pipeline.role.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['s3:GetObject'],
-      resources: [cdk.Fn.join('', [props.artifactBucket.bucketArn, '/', appSpecObjectKey])],
+      resources: [cdk.Fn.join('', [props.artifactBucket.bucketArn, '/', 'deployment-artifacts.zip'])],
       effect: iam.Effect.ALLOW,
     }));
     pipeline.role.addToPrincipalPolicy(new iam.PolicyStatement({
@@ -52,7 +52,7 @@ export class EcsBlueGreenPipelineStack extends cdk.Stack {
         new codepipeline_actions.S3SourceAction({
           actionName: 'S3_Source',
           bucket: props.artifactBucket,
-          bucketKey: appSpecObjectKey,
+          bucketKey: 'deployment-artifacts.zip',
           output: s3SourceOutput,
           trigger: codepipeline_actions.S3Trigger.NONE,
         }),

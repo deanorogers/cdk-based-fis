@@ -13,6 +13,7 @@ import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as path from 'path';
 import * as JSZip from 'jszip';
 import * as yaml from 'js-yaml';
+import * as cr from 'aws-cdk-lib/custom-resources';
 
 export interface EcsBlueGreenStackProps extends cdk.StackProps {
 
@@ -38,7 +39,7 @@ export class EcsBlueGreenStack extends cdk.Stack {
   public cluster: ecs.Cluster;
   public service: ecs.FargateService;
   public applicationName: string;
-  public deployedObjectKey: string; // expose the deployed object key token
+  // public deployedObjectKey: string; // expose the deployed object key token
 
   constructor(scope: cdk.App, id: string, props: EcsBlueGreenStackProps) {
     super(scope, id, props);
@@ -153,8 +154,8 @@ export class EcsBlueGreenStack extends cdk.Stack {
       taskRoleArn: taskRoleArn,
       networkMode: 'awsvpc',
       requiresCompatibilities: ['FARGATE'],
-      cpu: "256",
-      memory: "512",
+      cpu: "512",
+      memory: "1024",
       containerDefinitions: [
         {
           name: 'customer-portal',
@@ -217,25 +218,55 @@ export class EcsBlueGreenStack extends cdk.Stack {
     fs.writeFileSync(path.join(configDir, 'imageDetail.json'), JSON.stringify(imageDetailContent, null, 2));
     fs.writeFileSync(path.join(configDir, 'taskdef.json'), JSON.stringify(taskDefContent, null, 2));
 
-    // Upload zip file to S3
-    // the zip file will be named with a generated hash
-    // therefore, need to obtain for use in code pipleine stack
-    // destinationKeyPrefix: `${props.serviceName}/`,
-    const deployment = new s3deploy.BucketDeployment(this, 'DeployAppSpecV2', {
-      sources: [s3deploy.Source.asset(configDir)],
-      destinationBucket: props.bucket,
-      extract: false, // do not extract, we want the ZIP as is
-      prune: true
-      // outputObjectKeys defaults to true; we need it to select the first key
+    // Create an Asset from the directory (CDK will zip it)
+    const zipAsset = new cdk.aws_s3_assets.Asset(this, 'DeploymentZip', {
+      path: configDir,
     });
-    const deployedObjectKey = cdk.Fn.select(0, deployment.objectKeys); // to be passed to the pipeline stack
-    this.deployedObjectKey = deployedObjectKey; // expose the deployedObjectKey token
+
+    // Copy the asset to your bucket with a fixed key
+    const copyResource = new cr.AwsCustomResource(this, 'CopyZipToFixedKey', {
+      onUpdate: {
+        service: 'S3',
+        action: 'copyObject',
+        parameters: {
+          Bucket: props.bucket.bucketName,
+          CopySource: `${zipAsset.s3BucketName}/${zipAsset.s3ObjectKey}`,
+          Key: 'deployment-artifacts.zip',
+        },
+        physicalResourceId: cr.PhysicalResourceId.of('deployment-artifacts.zip'),
+      },
+      policy: cr.AwsCustomResourcePolicy.fromSdkCalls({
+        resources: [
+          props.bucket.arnForObjects('*'),
+          zipAsset.bucket.arnForObjects('*')
+        ],
+      }),
+    });
+
+    // Grant the Custom Resource permission to read from the asset bucket
+    zipAsset.grantRead(copyResource);
+    props.bucket.grantPut(copyResource);
+
+//     // Upload zip file to S3
+//     // the zip file will be named with a generated hash
+//     // therefore, need to obtain for use in code pipleine stack
+//     // destinationKeyPrefix: `${props.serviceName}/`,
+//     const deployment = new s3deploy.BucketDeployment(this, 'DeployAppSpecV2', {
+//       sources: [s3deploy.Source.asset(configDir)],
+//       destinationKeyPrefix: 'deployment-artifacts.zip',
+//       destinationBucket: props.bucket,
+//       extract: false, // do not extract, we want the ZIP as is
+//       prune: true
+//       // outputObjectKeys defaults to true; we need it to select the first key
+//     });
+    //const deployedObjectKey = cdk.Fn.select(0, deployment.objectKeys); // to be passed to the pipeline stack
+    // this.deployedObjectKey = deployedObjectKey; // expose the deployedObjectKey token
 
     // output a single string (the first object key) to allow clean cross-stack import
-    new cdk.CfnOutput(this, 'AppSpecS3Key', {
-      value: cdk.Token.asString(deployedObjectKey),
-      exportName: `${props.serviceName}-appspec-s3-key`
-    });
+//     new cdk.CfnOutput(this, 'AppSpecS3Key', {
+//       value: cdk.Token.asString('deployedObjectKey'),
+//       exportName: `${props.serviceName}-appspec-s3-key`
+//     });
 
     // Output the values needed for CodeDeploy configuration
     new cdk.CfnOutput(this, 'BlueTargetGroupArn', {
