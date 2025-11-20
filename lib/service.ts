@@ -148,6 +148,10 @@ export class EcsBlueGreenStack extends cdk.Stack {
     const taskRoleArn = `arn:aws:iam::${accountId}:role/${props.name}-ecs-task-role`;
 
     // Create task definition JSON (with roles added dynamically)
+    // Note: a better of doing this is to et CDK generate the task definition JSON
+    // this is safer and avoids duplication
+    // const taskDefContent = taskDef.renderTaskDefinition();
+    // const taskDefContent = taskDef.renderTaskDefinition();
     const taskDefContent = {
       family: taskDef.family,
       executionRoleArn: executionRoleArn,
