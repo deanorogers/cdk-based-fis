@@ -13,4 +13,5 @@ const ecsServiceStack = new ECSServiceStack(app, 'ECSServiceStack', {
 // pass in cluster arn to be used in the experiment
 const fisStack = new FaultInjectionStack(app, 'FaultInjectionStack', {
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+
 });
