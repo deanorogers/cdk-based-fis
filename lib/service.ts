@@ -92,10 +92,26 @@ export class EcsBlueGreenStack extends cdk.Stack {
       defaultTargetGroups: [blueTargetGroup]
     });
 
+//     listener.addRule('MyDefaultRule', {
+//         priority: 10,
+//         actions: [
+//             elbv2.ListenerAction.modifyRequestHeader('X-Routed-By-Falcon', {
+//                 headerName: 'X-Routed-By',
+//                 headerValue: 'Falcon'
+//             }
+//         ]
+//     });
+
     const testListener = alb.addListener('TestListener', {
       port: 8080,
       open: true,
       defaultTargetGroups: [greenTargetGroup]
+    });
+
+    const remoteListener = alb.addListener('RemoteListener', {
+        port: 9090,
+        open: true,
+        defaultTargetGroups: [greenTargetGroup]
     });
 
     // create explicitly (rather than as part of deploymentGroup)
@@ -194,17 +210,17 @@ export class EcsBlueGreenStack extends cdk.Stack {
     service.connections.allowFrom(alb, ec2.Port.tcp(props.portRange), 'Allow traffic from ALB to ECS Service');
 
    service.attachToApplicationTargetGroup(blueTargetGroup as ApplicationTargetGroup);
-    const deploymentGroup = new EcsDeploymentGroup(this, 'BlueGreenDG', {
-        application: application,
-        service,
-        blueGreenDeploymentConfig: {
-            blueTargetGroup: blueTargetGroup,
-            greenTargetGroup: greenTargetGroup,
-            listener: listener,
-            testListener: testListener,
-        },
-        deploymentConfig: EcsDeploymentConfig.ALL_AT_ONCE,
-    });
+   const deploymentGroup = new EcsDeploymentGroup(this, 'BlueGreenDG', {
+     application: application,
+     service,
+     blueGreenDeploymentConfig: {
+         blueTargetGroup: blueTargetGroup,
+         greenTargetGroup: greenTargetGroup,
+         listener: listener,
+         testListener: testListener,
+     },
+     deploymentConfig: EcsDeploymentConfig.ALL_AT_ONCE,
+   });
 
     this.deploymentGroup = deploymentGroup;
 
