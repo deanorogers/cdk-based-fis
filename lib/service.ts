@@ -14,6 +14,8 @@ import * as path from 'path';
 import * as JSZip from 'jszip';
 import * as yaml from 'js-yaml';
 import * as cr from 'aws-cdk-lib/custom-resources';
+import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 
 export interface EcsBlueGreenStackProps extends cdk.StackProps {
 
@@ -29,6 +31,7 @@ export interface EcsBlueGreenStackProps extends cdk.StackProps {
     imageTag: string; // the tag of the image to be deployed, if run as part of GitLab CI/CD this would be the commit SHA or branch name
     bucket: cdk.aws_s3.IBucket;
     accountId?: string; // optional explicit account id for building concrete ARNs in artifacts
+    lambdaArn: string; // optional Lambda ARN for simulating VPC Endpoint
 }
 
 export class EcsBlueGreenStack extends cdk.Stack {
@@ -82,25 +85,28 @@ export class EcsBlueGreenStack extends cdk.Stack {
     };
 
     const blueTargetGroup = new elbv2.ApplicationTargetGroup(this, 'BlueTargetGroup', tg);
-    // const blueTargetGroup = new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(this, 'BlueTargetGroup', tg);
     const greenTargetGroup = new elbv2.ApplicationTargetGroup(this, 'GreenTargetGroup', tg);
-    // const greenTargetGroup = new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(this, 'GreenTargetGroup', tg);
+
+    // Import the Lambda function by ARN
+    const remoteLambda = lambda.Function.fromFunctionAttributes(this, 'RemoteLambdaFromArn', {
+      functionArn: props.lambdaArn,
+      sameEnvironment: true
+    });
+    const remoteTargetGroup = new elbv2.ApplicationTargetGroup(this, 'RemoteTargetGroup', {
+       vpc: vpc,
+       targetType: elbv2.TargetType.LAMBDA,
+       // lookup the lambdaFunction by its passed arn
+       targets: [new elbv2_targets.LambdaTarget(remoteLambda)],
+    });
 
     const listener = alb.addListener('Listener', {
       port: props.portRange,
       open: true,
-      defaultTargetGroups: [blueTargetGroup]
+      defaultAction: elbv2.ListenerAction.weightedForward([
+          { targetGroup: blueTargetGroup, weight: 70 },
+          { targetGroup: remoteTargetGroup, weight: 30 }
+        ])
     });
-
-//     listener.addRule('MyDefaultRule', {
-//         priority: 10,
-//         actions: [
-//             elbv2.ListenerAction.modifyRequestHeader('X-Routed-By-Falcon', {
-//                 headerName: 'X-Routed-By',
-//                 headerValue: 'Falcon'
-//             }
-//         ]
-//     });
 
     const testListener = alb.addListener('TestListener', {
       port: 8080,
@@ -108,11 +114,11 @@ export class EcsBlueGreenStack extends cdk.Stack {
       defaultTargetGroups: [greenTargetGroup]
     });
 
-    const remoteListener = alb.addListener('RemoteListener', {
-        port: 9090,
-        open: true,
-        defaultTargetGroups: [greenTargetGroup]
-    });
+//     const remoteListener = alb.addListener('RemoteListener', {
+//         port: 9090,
+//         open: true,
+//         defaultTargetGroups: [greenTargetGroup]
+//     });
 
     // create explicitly (rather than as part of deploymentGroup)
     // then export for reference in the code pipeline stack

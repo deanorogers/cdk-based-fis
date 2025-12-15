@@ -5,6 +5,8 @@ import { EcsFoundationStack } from '../lib/foundation';
 import { EcsBlueGreenStack } from '../lib/service';
 import { FaultInjectionStack } from '../fis';
 import { EcsBlueGreenPipelineStack } from '../lib/pipeline';
+import { HelloWorldLambdaStack } from '../lib/lambda';
+import { ControllerStack } from '../lib/controller';
 
 const app = new cdk.App();
 
@@ -12,6 +14,10 @@ const name = 'customer-portal';
 const portRange = 80;
 const testPort = 8080;
 const serviceName = 'api';
+
+const lambdaStack = new HelloWorldLambdaStack(app, 'HelloWorldLambdaStack', {
+    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
+});
 
 const ecsFoundationStack = new EcsFoundationStack(app, 'EcsFoundationStack', {
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
@@ -32,7 +38,8 @@ const ecsServiceStack = new EcsBlueGreenStack(app, 'EcsBlueGreenStack', {
     vpc: ecsFoundationStack.vpc,
     ecrRepository: ecsFoundationStack.ecrRepository,
     imageTag: app.node.tryGetContext('imageTag') || '1.0.1',
-    bucket: ecsFoundationStack.artifactBucket
+    bucket: ecsFoundationStack.artifactBucket,
+    lambdaArn: lambdaStack.helloWorldLambdaArn
 });
 
 // Create the pipeline stack
@@ -46,6 +53,10 @@ const pipelineStack = new EcsBlueGreenPipelineStack(app, 'EcsBlueGreenPipelineSt
   applicationName: ecsServiceStack.applicationName,
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
   artifactBucket: ecsFoundationStack.artifactBucket
+});
+
+const controllerStack = new ControllerStack(app, 'ControllerStack', {
+    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
 });
 
 // No need for explicit addDependency - CDK will handle it automatically
