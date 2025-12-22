@@ -5,3 +5,8 @@ cdk.out
 *.d.ts
 package-lock.json
 node_modules
+.DS_Store
+working
+artifact
+artifacts
+sidecar

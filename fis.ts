@@ -1,16 +1,10 @@
-import * as cdk from 'aws-cdk-lib';
 import {aws_logs, RemovalPolicy} from 'aws-cdk-lib';
+import * as cdk from 'aws-cdk-lib';
 import {aws_fis as fis} from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as fs from 'fs';
-import { CustomS3Bucket } from './custom-s3-bucket';
+import { CustomS3Bucket } from './packages/custom-s3-bucket';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
-
-// define custom props
-// export interface FaultInjectionStackProps extends cdk.StackProps {
-//   fisParametersJson?: string; // JSON-encoded parameters for FIS actions, e.g. `{"duration":"PT10M","percent":"90"}`
-//
-// }
 
 export class FaultInjectionStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props: cdk.StackProps) {
@@ -200,6 +194,12 @@ export class FaultInjectionStack extends cdk.Stack {
         ],
         resources: ["*"]
     }));
+
+    // output fisRole to be referenced from other stacks
+    new cdk.CfnOutput(this, 'FISRoleOutput', {
+      value: fisRole.roleArn,
+      exportName: 'FISRoleArn',
+    });
 
   }
 }
