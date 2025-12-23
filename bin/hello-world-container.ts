@@ -1,16 +1,62 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
-import { ECSServiceStack } from '../main';
+import { EcsFoundationStack } from '../lib/foundation';
+import { EcsBlueGreenStack } from '../lib/service';
 import { FaultInjectionStack } from '../fis';
+import { EcsBlueGreenPipelineStack } from '../lib/pipeline';
+import { HelloWorldLambdaStack } from '../lib/lambda';
+import { ControllerStack } from '../lib/controller';
 
 const app = new cdk.App();
 
-const ecsServiceStack = new ECSServiceStack(app, 'ECSServiceStack', {
-    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+const name = 'customer-portal';
+const portRange = 80;
+const testPort = 8080;
+const serviceName = 'api';
+
+const lambdaStack = new HelloWorldLambdaStack(app, 'HelloWorldLambdaStack', {
+    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
 });
 
-// pass in cluster arn to be used in the experiment
-const fisStack = new FaultInjectionStack(app, 'FaultInjectionStack', {
+const ecsFoundationStack = new EcsFoundationStack(app, 'EcsFoundationStack', {
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+    name: name,
+    portRange: portRange,
+    serviceName: serviceName
 });
+
+const ecsServiceStack = new EcsBlueGreenStack(app, 'EcsBlueGreenStack', {
+    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+    taskRoleName: ecsFoundationStack.taskDefRoleName,
+    taskExecRoleName: ecsFoundationStack.taskExecRoleName,
+    serviceRoleArn: ecsFoundationStack.serviceRoleArn,
+    portRange: portRange,
+    testPort: testPort,
+    name: name,
+    serviceName: serviceName,
+    vpc: ecsFoundationStack.vpc,
+    ecrRepository: ecsFoundationStack.ecrRepository,
+    imageTag: app.node.tryGetContext('imageTag') || '1.0.1',
+    bucket: ecsFoundationStack.artifactBucket,
+    lambdaArn: lambdaStack.helloWorldLambdaArn
+});
+
+// Create the pipeline stack
+// Pass the deployedObjectKey token directly from the ecsServiceStack (avoid import/export cycle)
+const pipelineStack = new EcsBlueGreenPipelineStack(app, 'EcsBlueGreenPipelineStack', {
+  ecrRepository: ecsFoundationStack.ecrRepository,
+  deploymentGroupName: ecsServiceStack.deploymentGroup.deploymentGroupName,
+  clusterName: ecsServiceStack.cluster.clusterName,
+  serviceName: serviceName, // use plain string to ensure stable export name resolution
+  taskDefinitionFamily: ecsServiceStack.taskDefinition.family,
+  applicationName: ecsServiceStack.applicationName,
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+  artifactBucket: ecsFoundationStack.artifactBucket
+});
+
+const controllerStack = new ControllerStack(app, 'ControllerStack', {
+    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
+});
+
+// No need for explicit addDependency - CDK will handle it automatically
