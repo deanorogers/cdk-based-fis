@@ -13,6 +13,7 @@ import * as appscaling from 'aws-cdk-lib/aws-applicationautoscaling';
 export class ECSServiceStack extends cdk.Stack {
   public readonly cluster: ecs.Cluster;
   public readonly bucket: s3.Bucket;
+  public readonly vpc: ec2.IVpc;
 
   constructor(scope: cdk.App, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -35,6 +36,7 @@ export class ECSServiceStack extends cdk.Stack {
         }
       ],
     });
+    this.vpc = vpc;
 
     // Create an ECS cluster
     this.cluster = new ecs.Cluster(this, 'service-cluster', {

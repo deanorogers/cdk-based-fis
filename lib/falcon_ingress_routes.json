@@ -1,0 +1,12 @@
+{
+  "routes": [
+    {
+      "path": "/app1",
+      "target_arn": "... alb arn ..."
+    },
+    {
+      "path": "/app1",
+      "target_arn": "... alb arn ..."
+    }
+  ]
+}
