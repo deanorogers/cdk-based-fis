@@ -1,8 +1,10 @@
-import * as cdk from 'aws-cdk-lib';
 import {aws_logs, RemovalPolicy} from 'aws-cdk-lib';
+import * as cdk from 'aws-cdk-lib';
 import {aws_fis as fis} from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as fs from 'fs';
+import { CustomS3Bucket } from './packages/custom-s3-bucket';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 
 export class FaultInjectionStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props: cdk.StackProps) {
@@ -22,7 +24,6 @@ export class FaultInjectionStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('fis.amazonaws.com'),
     });
 
-
     // Override the assumeRolePolicy with the custom trust policy
     (fisRole.node.defaultChild as iam.CfnRole).assumeRolePolicyDocument = trustPolicy;
 
@@ -32,6 +33,37 @@ export class FaultInjectionStack extends cdk.Stack {
       retention: aws_logs.RetentionDays.ONE_WEEK,
       removalPolicy: RemovalPolicy.DESTROY,
     });
+
+    // create s3 bucket to hold experiment report
+    const bucket = new CustomS3Bucket(this, 'FISExperimentReportBucket', {
+        bucketName: `fis-experiment-report-bucket-${account}-${region}`,
+        versioned: false
+    });
+
+    // define cloudwatch dashboard for FIS experiment but only with 1 widget to show
+    // EC2 CPU utilization
+    const fisDashboard = new cloudwatch.Dashboard(this, 'FISDashboard', {
+      dashboardName: 'FIS-ECS-CPU-Stress-Dashboard',
+    });
+
+    // Add a widget to monitor ECS CPU utilization
+    const cpuUtilizationWidget = new cloudwatch.GraphWidget({
+      title: 'ECS CPU Utilization',
+      left: [
+        new cloudwatch.Metric({
+          namespace: 'AWS/ECS',
+          metricName: 'CPUUtilization',
+          dimensionsMap: {
+            ClusterName: 'service-cluster',
+            ServiceName: 'ECSServiceStack-amazonecssampleService537E3215-jFW4el163OIQ', // replace with your service name
+          },
+          statistic: 'Maximum',
+          period: cdk.Duration.minutes(5),
+        }),
+      ],
+    });
+
+    fisDashboard.addWidgets(cpuUtilizationWidget);
 
     // define cfnExperimentTemplate for ECS CPU Stress test
     const experimentTemplate = new fis.CfnExperimentTemplate(this, 'ECSCPUStressTest', {
@@ -64,6 +96,25 @@ export class FaultInjectionStack extends cdk.Stack {
           },
         },
       },
+      experimentReportConfiguration:
+      {
+          outputs: {
+            experimentReportS3Configuration: {
+              bucketName: bucket.bucketName,
+
+              // the properties below are optional
+              prefix: 'ecs-cpu-stress-test-reports',
+            },
+          },
+          // the properties below are optional
+          dataSources: {
+            cloudWatchDashboards: [{
+              dashboardIdentifier: fisDashboard.dashboardArn,
+            }],
+          },
+          postExperimentDuration: 'PT15M',
+          preExperimentDuration: 'PT15M'
+      },
       tags: {
         Name: 'my-ecs-cpu-stress-exp'
       },
@@ -92,7 +143,8 @@ export class FaultInjectionStack extends cdk.Stack {
         "logs:PutLogEvents",
         "logs:CreateLogGroup",
         "logs:DescribeLogGroups",
-        "logs:DescribeLogStreams"
+        "logs:DescribeLogStreams",
+        "CloudWatch:GetDashboard"
       ],
       resources: ["*"]
     }));
@@ -115,6 +167,39 @@ export class FaultInjectionStack extends cdk.Stack {
       ],
       resources: ["*"]
     }));
+
+    // Report permission to s3
+    fisRole.addToPolicy(new iam.PolicyStatement({
+        actions: [
+            "s3:PutObject",
+            "s3:GetObject",
+            "s3:GetBucketLocation",
+            "s3:ListBucket"
+        ],
+        resources: [bucket.bucketArn, `${bucket.bucketArn}/*`]
+    }));
+
+    // Report permission to get dashboard
+    fisRole.addToPolicy(new iam.PolicyStatement({
+        actions: [
+            "cloudwatch:GetDashboard"
+        ],
+        resources: [fisDashboard.dashboardArn]
+    }));
+
+    // Report permission to Get widgets from dashboard
+    fisRole.addToPolicy(new iam.PolicyStatement({
+        actions: [
+            "cloudwatch:GetMetricWidgetImage"
+        ],
+        resources: ["*"]
+    }));
+
+    // output fisRole to be referenced from other stacks
+    new cdk.CfnOutput(this, 'FISRoleOutput', {
+      value: fisRole.roleArn,
+      exportName: 'FISRoleArn',
+    });
 
   }
 }

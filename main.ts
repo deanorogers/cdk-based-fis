@@ -6,7 +6,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as fis from './fis';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import { CustomS3Bucket } from './custom-s3-bucket';
+import { CustomS3Bucket } from './packages/custom-s3-bucket';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as appscaling from 'aws-cdk-lib/aws-applicationautoscaling';
 

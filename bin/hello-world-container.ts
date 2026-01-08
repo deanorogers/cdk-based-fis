@@ -2,7 +2,7 @@
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { ECSServiceStack } from '../main';
-import { FaultInjectionStack } from '../fis';
+import { MyFaultInjectionStack } from '../lib/fault-injection';
 
 const app = new cdk.App();
 
@@ -11,6 +11,6 @@ const ecsServiceStack = new ECSServiceStack(app, 'ECSServiceStack', {
 });
 
 // pass in cluster arn to be used in the experiment
-const fisStack = new FaultInjectionStack(app, 'FaultInjectionStack', {
-    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+const fisStack = new MyFaultInjectionStack(app, 'FaultInjectionStack', {
+    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
 });

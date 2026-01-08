@@ -15,4 +15,3 @@ export class CustomS3Bucket extends Bucket {
     });
   }
 }
-
