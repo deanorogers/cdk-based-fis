@@ -56,7 +56,7 @@ export class ECSServiceStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
 
-    // Create a Fargate Task Definition with a sidecar SSM Agent container
+    // Create a Fargate Task Definition
     const taskDef = new ecs.FargateTaskDefinition(this, 'TaskDef', {
       memoryLimitMiB: 512,
       cpu: 256,
