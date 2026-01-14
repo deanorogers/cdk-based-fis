@@ -6,6 +6,9 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 // define custom props to accept VPC
 export interface MyIngressControllerStackProps extends cdk.StackProps {
     readonly vpc?: ec2.IVpc;
+    readonly vpcEndpointServiceId?: string;
+    readonly vpcEndpointServiceRegion?: string;
+    readonly allowedRegion: string;  // Required parameter
 }
 
 export class MyIngressControllerStack extends cdk.Stack {
@@ -13,7 +16,10 @@ export class MyIngressControllerStack extends cdk.Stack {
      super(scope, id, props);
 
      const ingress = new CustomIngressController(this, 'MyIngressController', {
-         vpc: props.vpc
+         vpc: props.vpc,
+         vpcEndpointServiceId: props.vpcEndpointServiceId,
+         vpcEndpointServiceRegion: props.vpcEndpointServiceRegion,
+         allowedRegion: props.allowedRegion
      });
 
     /*
@@ -25,7 +31,7 @@ export class MyIngressControllerStack extends cdk.Stack {
                'Name':  'AccountServiceALB'
         } // have to be clever than this for real
     });
-    ingress.addRoute('/accounts', accountALB.loadBalancerArn);
+    // ingress.addRoute('/accounts', accountALB.loadBalancerArn);
 
   }
  }

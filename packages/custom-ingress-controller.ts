@@ -5,16 +5,24 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as assetPath from 'path';
 import * as elasticloadbalancingv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
+import * as cr from 'aws-cdk-lib/custom-resources';
 
 export interface CustomIngressControllerProps extends cdk.ResourceProps {
     readonly vpc?: ec2.IVpc;
+    readonly vpcEndpointServiceId?: string;
+    readonly vpcEndpointServiceRegion?: string;
+    readonly allowedRegion: string;  // Required parameter
 }
 
 export class CustomIngressController extends cdk.Resource {
   public readonly vpc: ec2.IVpc;
   private alb: cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer;
   private localTargetGroup : cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup;
+  private remoteTargetGroup : cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup;
   private listener : cdk.aws_elasticloadbalancingv2.ApplicationListener;
+  private internalListener : cdk.aws_elasticloadbalancingv2.ApplicationListener;
 
   constructor(scope: Construct, id: string, props?: CustomIngressControllerProps) {
     super(scope, id, {
@@ -48,6 +56,139 @@ export class CustomIngressController extends cdk.Resource {
             messageBody: 'Resource Not Found'
         })
     });
+
+    this.internalListener = alb.addListener('InternalListener', {
+        port: 8080,
+        open: true,
+        defaultAction: elbv2.ListenerAction.fixedResponse(404, {
+            contentType: 'text/plain',
+            messageBody: 'Resource Not Found'
+        })
+    });
+
+    // define remote target group but leave unattached for now
+    this.remoteTargetGroup = new elbv2.ApplicationTargetGroup(this, 'IngressControllerRemoteTargetGroup', {
+            vpc: this.vpc,
+            port: 80,
+            protocol: elbv2.ApplicationProtocol.HTTP,
+            targetType: elbv2.TargetType.IP,
+            targetGroupName: 'IngressControllerRemoteTG'
+    });
+
+    cdk.Tags.of(this.remoteTargetGroup).add('Name', 'IngressControllerRemoteTG');
+
+   /*********************************************************************************
+   ** provision NLB to terminate VPC Endpoint connections
+   ** the NLB targets the internal listener of the ALB
+   **********************************************************************************/
+    const nlb = new cdk.aws_elasticloadbalancingv2.NetworkLoadBalancer(this, 'IngressControllerNLB', {
+        vpc: this.vpc,
+        internetFacing: false,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+    });
+
+    const nlbTargetGroup = new elbv2.NetworkTargetGroup(this, 'IngressControllerNLBTargetGroup', {
+      targetGroupName: 'CrossRegionNLBtg',
+      vpc: this.vpc,
+      port: 8080,
+      protocol: elbv2.Protocol.TCP,
+      targetType: elbv2.TargetType.ALB,
+      healthCheck: {
+          enabled: true,
+          protocol: elbv2.Protocol.HTTP,
+          port: '8080',
+          path: '/',
+          healthyHttpCodes: '404',
+          interval: cdk.Duration.seconds(30),
+          timeout: cdk.Duration.seconds(10),
+          healthyThresholdCount: 2,
+          unhealthyThresholdCount: 2,
+      },
+    });
+
+    const albTarget = new elasticloadbalancingv2_targets.AlbTarget(this.alb, 8080);
+    nlbTargetGroup.addTarget(albTarget);
+
+    // attach the target group to a listener on the NLB
+    const nlbListener = nlb.addListener('IngressControllerNLBListener', {
+      port: 80,
+      defaultTargetGroups: [nlbTargetGroup],
+    });
+
+    // define VPC Endpoint Service for the NLB so other regions can connect
+    if (!props) {
+      throw new Error('Props must be provided to CustomIngressController');
+    }
+
+    const vpcEndpointService = new ec2.VpcEndpointService(this, 'IngressControllerVPCEndpointService', {
+      vpcEndpointServiceLoadBalancers: [nlb],
+      acceptanceRequired: false,
+      allowedRegions: [props.allowedRegion],
+      allowedPrincipals: [new iam.AccountPrincipal(cdk.Stack.of(this).account)]
+    });
+
+   /********************************************************************************/
+
+
+    // the stack is created without establishing the VPC Endpoint connection
+    if (props?.vpcEndpointServiceId) {
+
+        const serviceName = `com.amazonaws.vpce.${props.vpcEndpointServiceRegion}.${props.vpcEndpointServiceId}`;
+
+        // conditionally define the egress vpc endpoint if VpcEndpointService prop provided
+        const endpoint = new ec2.InterfaceVpcEndpoint(this, 'CrossRegionEndpoint', {
+            vpc: this.vpc,
+            service: new ec2.InterfaceVpcEndpointService(serviceName, 80),
+            serviceRegion: props.vpcEndpointServiceRegion,
+            privateDnsEnabled: false,
+            // subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        });
+
+//         // register the IPs of the endpoint as targets in the remote target group
+//         const eni0 = cdk.Fn.select(0, endpoint.vpcEndpointNetworkInterfaceIds);
+//         this.remoteTargetGroup.addTarget(
+//             new elbv2_targets.IpTarget(eni0, 80)
+//         );
+
+        // Select the subnets used by the endpoint so we can iterate over them
+               const subnets = this.vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS });
+
+               // Iterate through each subnet to handle its corresponding ENI
+               subnets.subnetIds.forEach((subnetId, index) => {
+                   // 1. Retrieve the specific ENI ID for this index from the Endpoint construct
+                   const eniId = cdk.Fn.select(index, endpoint.vpcEndpointNetworkInterfaceIds);
+
+                   // 2. Create a Custom Resource to fetch the Private IP of that ENI at runtime
+                   const getEniIp = new cr.AwsCustomResource(this, `GetEndpointIp-${index}`, {
+                       onCreate: {
+                           service: 'EC2',
+                           action: 'describeNetworkInterfaces',
+                           parameters: { NetworkInterfaceIds: [eniId] },
+                           physicalResourceId: cr.PhysicalResourceId.of(`IpResolver-${index}`),
+                       },
+                       onUpdate: {
+                           service: 'EC2',
+                           action: 'describeNetworkInterfaces',
+                           parameters: { NetworkInterfaceIds: [eniId] },
+                           physicalResourceId: cr.PhysicalResourceId.of(`IpResolver-${index}`),
+                       },
+                       policy: cr.AwsCustomResourcePolicy.fromStatements([
+                           new iam.PolicyStatement({
+                               actions: ['ec2:DescribeNetworkInterfaces'],
+                               resources: ['*'],
+                           }),
+                       ]),
+                   });
+
+                   // 3. Extract the Private IP address from the API response
+                   const ip = getEniIp.getResponseField('NetworkInterfaces.0.PrivateIpAddress');
+
+                   // 4. Add the resolved IP as a target to the remote target group
+                   this.remoteTargetGroup.addTarget(
+                       new elbv2_targets.IpTarget(ip, 80)
+                   );
+               });
+    }
 
   } // end of constructor
 
@@ -114,7 +255,7 @@ export class CustomIngressController extends cdk.Resource {
       vpc: this.vpc,
       port: 80,
       protocol: elbv2.Protocol.TCP,
-      targetType: elbv2.TargetType.ALB,
+      targetType: elbv2.TargetType.ALB
     });
 
     // the NLB needs a listener on port 80 and attach the network target group as its default
