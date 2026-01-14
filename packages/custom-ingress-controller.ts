@@ -48,6 +48,8 @@ export class CustomIngressController extends cdk.Resource {
     });
     this.alb = alb;
 
+    cdk.Tags.of(alb).add('MANAGED', 'true');
+
     this.listener = alb.addListener('Listener', {
         port: 80,
         open: true,
