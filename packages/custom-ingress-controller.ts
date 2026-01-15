@@ -18,7 +18,7 @@ export interface CustomIngressControllerProps extends cdk.ResourceProps {
 
 export class CustomIngressController extends cdk.Resource {
   public readonly vpc: ec2.IVpc;
-  private alb: cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer;
+  public alb: cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer;
   private localTargetGroup : cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup;
   private remoteTargetGroup : cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup;
   private listener : cdk.aws_elasticloadbalancingv2.ApplicationListener;
@@ -146,61 +146,56 @@ export class CustomIngressController extends cdk.Resource {
             // subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
         });
 
-//         // register the IPs of the endpoint as targets in the remote target group
-//         const eni0 = cdk.Fn.select(0, endpoint.vpcEndpointNetworkInterfaceIds);
-//         this.remoteTargetGroup.addTarget(
-//             new elbv2_targets.IpTarget(eni0, 80)
-//         );
-
         // Select the subnets used by the endpoint so we can iterate over them
-               const subnets = this.vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS });
+       const subnets = this.vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS });
 
-               // Iterate through each subnet to handle its corresponding ENI
-               subnets.subnetIds.forEach((subnetId, index) => {
-                   // 1. Retrieve the specific ENI ID for this index from the Endpoint construct
-                   const eniId = cdk.Fn.select(index, endpoint.vpcEndpointNetworkInterfaceIds);
+       // Iterate through each subnet to handle its corresponding ENI
+       subnets.subnetIds.forEach((subnetId, index) => {
+           // 1. Retrieve the specific ENI ID for this index from the Endpoint construct
+           const eniId = cdk.Fn.select(index, endpoint.vpcEndpointNetworkInterfaceIds);
 
-                   // 2. Create a Custom Resource to fetch the Private IP of that ENI at runtime
-                   const getEniIp = new cr.AwsCustomResource(this, `GetEndpointIp-${index}`, {
-                       onCreate: {
-                           service: 'EC2',
-                           action: 'describeNetworkInterfaces',
-                           parameters: { NetworkInterfaceIds: [eniId] },
-                           physicalResourceId: cr.PhysicalResourceId.of(`IpResolver-${index}`),
-                       },
-                       onUpdate: {
-                           service: 'EC2',
-                           action: 'describeNetworkInterfaces',
-                           parameters: { NetworkInterfaceIds: [eniId] },
-                           physicalResourceId: cr.PhysicalResourceId.of(`IpResolver-${index}`),
-                       },
-                       policy: cr.AwsCustomResourcePolicy.fromStatements([
-                           new iam.PolicyStatement({
-                               actions: ['ec2:DescribeNetworkInterfaces'],
-                               resources: ['*'],
-                           }),
-                       ]),
-                   });
+           // 2. Create a Custom Resource to fetch the Private IP of that ENI at runtime
+           const getEniIp = new cr.AwsCustomResource(this, `GetEndpointIp-${index}`, {
+               onCreate: {
+                   service: 'EC2',
+                   action: 'describeNetworkInterfaces',
+                   parameters: { NetworkInterfaceIds: [eniId] },
+                   physicalResourceId: cr.PhysicalResourceId.of(`IpResolver-${index}`),
+               },
+               onUpdate: {
+                   service: 'EC2',
+                   action: 'describeNetworkInterfaces',
+                   parameters: { NetworkInterfaceIds: [eniId] },
+                   physicalResourceId: cr.PhysicalResourceId.of(`IpResolver-${index}`),
+               },
+               policy: cr.AwsCustomResourcePolicy.fromStatements([
+                   new iam.PolicyStatement({
+                       actions: ['ec2:DescribeNetworkInterfaces'],
+                       resources: ['*'],
+                   }),
+               ]),
+           });
 
-                   // 3. Extract the Private IP address from the API response
-                   const ip = getEniIp.getResponseField('NetworkInterfaces.0.PrivateIpAddress');
+           // 3. Extract the Private IP address from the API response
+           const ip = getEniIp.getResponseField('NetworkInterfaces.0.PrivateIpAddress');
 
-                   // 4. Add the resolved IP as a target to the remote target group
-                   this.remoteTargetGroup.addTarget(
-                       new elbv2_targets.IpTarget(ip, 80)
-                   );
-               });
+           // 4. Add the resolved IP as a target to the remote target group
+           this.remoteTargetGroup.addTarget(
+               new elbv2_targets.IpTarget(ip, 80)
+           );
+       });
     }
 
   } // end of constructor
 
   /* for route provision the following resources
-  ** - create local & remote target groups
-  ** - create path-based listener rule
-  ** - provision lambda function to update target groups (not implemented here)
-  ** - input params:
-  ** -- path, e.g. /accounts
-  ** -- target, the service ALB
+  ** - provision a service-specific NLB
+  ** - provision local target group
+  ** - register IPs of service-specific NLB in local target group
+  ** - configure external ALB
+  **  |-- create path-based listener action to forward to local & remote target groups with weights
+  ** - configure internal ALB
+  **  |-- create path-based listener action to forward to local target group only
   */
   public addRoute(path: string, destinationAlbArn: string) {
 
@@ -211,16 +206,8 @@ export class CustomIngressController extends cdk.Resource {
 
     // define target group name using sanitized & capitalized pathBasedName
     const targetGroupNameLocal = `TGLocalFor${pathBasedName}`;
-    const targetGroupNameRemote = `TGRemoteFor${pathBasedName}`;
 
     const localTargetGroup = new elbv2.ApplicationTargetGroup(this, targetGroupNameLocal, {
-            vpc: this.vpc,
-            port: 80,
-            protocol: elbv2.ApplicationProtocol.HTTP,
-            targetType: elbv2.TargetType.IP
-    });
-
-    const remoteTargetGroup = new elbv2.ApplicationTargetGroup(this, targetGroupNameRemote, {
             vpc: this.vpc,
             port: 80,
             protocol: elbv2.ApplicationProtocol.HTTP,
@@ -240,10 +227,19 @@ export class CustomIngressController extends cdk.Resource {
                  weight: 90
              },
              {
-                 targetGroup: remoteTargetGroup,
+                 targetGroup: this.remoteTargetGroup,
                  weight: 10
              }
          ]),
+     });
+
+    // add path based rule to internalListener to localTargetGroup
+    this.internalListener.addAction(`InternalRuleFor${pathBasedName}`, {
+         priority: rulePriority,
+         conditions: [
+             elbv2.ListenerCondition.pathPatterns([path])
+         ],
+         action: elbv2.ListenerAction.forward([localTargetGroup]),
      });
 
     // create an internal NLB to target the service's ALB
@@ -251,6 +247,7 @@ export class CustomIngressController extends cdk.Resource {
       vpc: this.vpc,
       internetFacing: false,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      loadBalancerName: `NLBFor${pathBasedName}`
     });
 
     const nlbTargetGroup = new elbv2.NetworkTargetGroup(this, `NLBTargetFor${pathBasedName}`, {

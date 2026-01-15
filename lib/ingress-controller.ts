@@ -9,6 +9,7 @@ export interface MyIngressControllerStackProps extends cdk.StackProps {
     readonly vpcEndpointServiceId?: string;
     readonly vpcEndpointServiceRegion?: string;
     readonly allowedRegion: string;  // Required parameter
+    readonly destinationAlb?: elbv2.IApplicationLoadBalancer;  // Optional ALB for routing
 }
 
 export class MyIngressControllerStack extends cdk.Stack {
@@ -24,14 +25,9 @@ export class MyIngressControllerStack extends cdk.Stack {
 
     /*
     ** Add routing rules to the Ingress Controller
-    ** Lookup your service ALB to be targeted by the URL path
+    ** this should be an iteration for contents of the json file
     */
-    const accountALB = elbv2.ApplicationLoadBalancer.fromLookup(this, 'AccountALB', {
-        loadBalancerTags: {
-               'Name':  'AccountServiceALB'
-        } // have to be clever than this for real
-    });
-    // ingress.addRoute('/accounts', accountALB.loadBalancerArn);
-
+//     ingress.addRoute('/accounts', "arn:aws:elasticloadbalancing:us-east-1:107404535822:loadbalancer/app/ECSSer-amazo-EEPPmj25r9Vg/620932af2ae4a228");
+    ingress.addRoute('/accounts', "arn:aws:elasticloadbalancing:us-west-2:107404535822:loadbalancer/app/ECSSer-amazo-IN9Z4JM7Xnve/2ee56278d126f8ed");
   }
  }

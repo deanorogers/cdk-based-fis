@@ -1,12 +1,8 @@
 {
   "routes": [
     {
-      "path": "/app1",
-      "target_arn": "... alb arn ..."
-    },
-    {
-      "path": "/app1",
-      "target_arn": "... alb arn ..."
+      "path": "/accounts",
+      "target_arn": "arn:aws:elasticloadbalancing:us-east-1:107404535822:loadbalancer/app/ECSSer-amazo-EEPPmj25r9Vg/620932af2ae4a228"
     }
   ]
 }

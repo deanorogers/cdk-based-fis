@@ -28,5 +28,6 @@ const ingressStack = new MyIngressControllerStack(app, 'IngressControllerStack',
     vpc: ecsServiceStack.vpc,
     vpcEndpointServiceId: app.node.tryGetContext('vpcEndpointServiceId'),
     vpcEndpointServiceRegion: app.node.tryGetContext('vpcEndpointServiceRegion'),
-    allowedRegion: allowedRegion
+    allowedRegion: allowedRegion,
+    destinationAlb: ecsServiceStack.alb
 });

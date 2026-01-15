@@ -14,6 +14,7 @@ export class ECSServiceStack extends cdk.Stack {
   public readonly cluster: ecs.Cluster;
   public readonly bucket: s3.Bucket;
   public readonly vpc: ec2.IVpc;
+  public alb: cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer;
 
   constructor(scope: cdk.App, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -92,6 +93,9 @@ export class ECSServiceStack extends cdk.Stack {
       taskDefinition: taskDef,
       propagateTags: ecs.PropagatedTagSource.SERVICE, // propagate service tags to tasks
     });
+
+    // Export the ALB for use in other stacks
+    this.alb = loadBalancedFargateService.loadBalancer;
 
     // Add tag to the ECS service for FIS targeting
    cdk.Tags.of(this).add('FIS_ENABLED', 'true');
