@@ -40,12 +40,23 @@ export class CustomIngressController extends cdk.Resource {
     });
     controllerSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP inbound from anywhere');
 
+    // Create S3 bucket for ALB access logs
+    const albLogsBucket = new cdk.aws_s3.Bucket(this, 'ALBLogsBucket', {
+      bucketName: `alb-logs-osprey-${cdk.Aws.REGION}`,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      encryption: cdk.aws_s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: cdk.aws_s3.BlockPublicAccess.BLOCK_ALL,
+    });
+
     const alb = new cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer(this, 'ALB', {
       loadBalancerName: 'CustomIngressControllerALB',
       vpc: this.vpc,
       internetFacing: true,
       securityGroup: controllerSg,
     });
+    // Enable access logs after creating the ALB
+    alb.logAccessLogs(albLogsBucket, 'alb-access-logs');
     this.alb = alb;
 
     cdk.Tags.of(alb).add('MANAGED', 'true');
