@@ -4,6 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { ECSServiceStack } from '../main';
 import { MyFaultInjectionStack } from '../lib/fault-injection';
 import { MyIngressControllerStack } from '../lib/ingress-controller';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 
 const app = new cdk.App();
 

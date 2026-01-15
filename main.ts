@@ -9,6 +9,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import { CustomS3Bucket } from './packages/custom-s3-bucket';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as appscaling from 'aws-cdk-lib/aws-applicationautoscaling';
+import { CfnOutput } from 'aws-cdk-lib';
 
 export class ECSServiceStack extends cdk.Stack {
   public readonly cluster: ecs.Cluster;
@@ -70,12 +71,16 @@ export class ECSServiceStack extends cdk.Stack {
 
     // Main application container
     taskDef.addContainer('AppContainer', {
-      image: ecs.ContainerImage.fromRegistry('amazon/amazon-ecs-sample'),
+//       image: ecs.ContainerImage.fromRegistry('amazon/amazon-ecs-sample'),
+      image: ecs.ContainerImage.fromRegistry('ealen/echo-server:latest'),
       containerName: 'app',
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: id,
         logRetention: 1,
       }),
+      environment: {
+        'AWS_REGION': cdk.Aws.REGION,
+      },
       portMappings: [{ containerPort: 80 }],
     });
 
@@ -129,6 +134,18 @@ export class ECSServiceStack extends cdk.Stack {
       // cooldown to avoid rapid fluctuations
       cooldown: cdk.Duration.seconds(60),
     });
+
+// for us-east-1
+// new CfnOutput(this, 'ExportsOutputFnGetAttSkeletonVpc23B0CF08CidrBlock114B0B6E', {
+//   value: vpc.vpcCidrBlock,
+//   exportName: 'ECSServiceStack:ExportsOutputFnGetAttSkeletonVpc23B0CF08CidrBlock114B0B6E'
+// });
+
+// for us-west-2
+//    new CfnOutput(this, 'ECSServiceStack:ExportsOutputFnGetAttSkeletonVpc23B0CF08CidrBlock114B0B6E', {
+//       value: vpc.vpcCidrBlock,
+//       exportName: 'ECSServiceStack:ExportsOutputFnGetAttSkeletonVpc23B0CF08CidrBlock114B0B6E'
+//    });
 
   } // constructor
 } // stack
