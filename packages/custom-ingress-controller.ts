@@ -144,7 +144,10 @@ export class CustomIngressController extends cdk.Resource {
 
 
     // the stack is created without establishing the VPC Endpoint connection
+    console.log('Checking for VPC Endpoint Service parameters to establish cross-region connection...');
     if (props?.vpcEndpointServiceId) {
+
+        console.log('VPC Endpoint Service parameters found. Establishing cross-region VPC Endpoint connection...');
 
         const serviceName = `com.amazonaws.vpce.${props.vpcEndpointServiceRegion}.${props.vpcEndpointServiceId}`;
 

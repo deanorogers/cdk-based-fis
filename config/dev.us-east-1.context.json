@@ -1,0 +1,13 @@
+{
+  "stage": "dev",
+  "region": "us-east-1",
+  "vpcEndpointServiceId": "vpce-svc-0dea483c638f39faa",
+  "allowedRegion": "us-west-2",
+  "vpcEndpointServiceRegion": "us-west-2",
+  "routes": [
+    {
+      "path": "/accounts",
+      "target_arn": "arn:aws:elasticloadbalancing:us-east-1:107404535822:loadbalancer/app/ECSSer-amazo-EEPPmj25r9Vg/620932af2ae4a228"
+    }
+  ]
+}
