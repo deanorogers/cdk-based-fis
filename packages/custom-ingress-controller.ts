@@ -38,7 +38,9 @@ export class CustomIngressController extends cdk.Resource {
       description: 'Security group for Ingress Controller ALB',
       allowAllOutbound: true,
     });
-    controllerSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP inbound from anywhere');
+    // controllerSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP inbound from anywhere');
+    // add addIngressRule that restricts traffic to port 80 from my IP -> 31.127.89.241
+    controllerSg.addIngressRule(ec2.Peer.ipv4('31.127.89.241/32'), ec2.Port.tcp(80), 'Allow HTTP inbound from specific IP');
 
     // Create S3 bucket for ALB access logs
     const albLogsBucket = new cdk.aws_s3.Bucket(this, 'ALBLogsBucket', {
@@ -99,6 +101,18 @@ export class CustomIngressController extends cdk.Resource {
         internetFacing: false,
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
     });
+
+    // create a security group for the NLB that allows inbound TCP port 80 from anywhere
+    const nlbSg = new ec2.SecurityGroup(this, 'IngressControllerNLBSG', {
+      vpc: this.vpc,
+      description: 'Security group for Ingress Controller NLB',
+      allowAllOutbound: true,
+    });
+    nlbSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow TCP inbound from anywhere');
+    nlb.addSecurityGroup(nlbSg);
+
+    // only allow cross-region traffic into the internal listener of the ALB
+    controllerSg.addIngressRule(nlbSg, ec2.Port.tcp(8080), 'Allow HTTP inbound from NLB SG');
 
     const nlbTargetGroup = new elbv2.NetworkTargetGroup(this, 'IngressControllerNLBTargetGroup', {
       targetGroupName: 'CrossRegionNLBtg',

@@ -1,7 +1,7 @@
 {
   "stage": "dev",
   "region": "us-west-2",
-  "vpcEndpointServiceId": "vpce-svc-0aceb393bb05a5896",
+  "vpcEndpointServiceId": "vpce-svc-0f64a324b15554c98",
   "allowedRegion": "us-east-1",
   "vpcEndpointServiceRegion": "us-east-1",
   "routes": [
