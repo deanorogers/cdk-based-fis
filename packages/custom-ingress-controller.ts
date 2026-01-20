@@ -63,6 +63,7 @@ export class CustomIngressController extends cdk.Resource {
 
     cdk.Tags.of(alb).add('MANAGED', 'true');
 
+    // external listener
     this.listener = alb.addListener('Listener', {
         port: 80,
         open: true,
@@ -108,6 +109,7 @@ export class CustomIngressController extends cdk.Resource {
       description: 'Security group for Ingress Controller NLB',
       allowAllOutbound: true,
     });
+    // try and restrict to CIDR of the other region?
     nlbSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow TCP inbound from anywhere');
     nlb.addSecurityGroup(nlbSg);
 
@@ -218,7 +220,7 @@ export class CustomIngressController extends cdk.Resource {
 
   /* for route provision the following resources
   ** - provision a service-specific NLB
-  ** - provision local target group
+  ** - provision local target group of the ALB listeners
   ** - register IPs of service-specific NLB in local target group
   ** - configure external ALB
   **  |-- create path-based listener action to forward to local & remote target groups with weights
